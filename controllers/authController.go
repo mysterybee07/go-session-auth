@@ -111,3 +111,95 @@ func Home(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write([]byte(fmt.Sprintf("Welcome %s ! Your Role is %s", userSession.username, userSession.role)))
 }
+
+func RefreshToken(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session_cookie")
+	if err != nil {
+		if err == http.ErrNoCookie {
+			http.Error(w, `{"message": "No session cookie provided"}`, http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, `{"message": "Invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	sessionToken := cookie.Value
+	userSession, exists := sessions[sessionToken]
+	if !exists {
+		http.Error(w, `{"message": "Invalid session token"}`, http.StatusUnauthorized)
+		return
+	}
+
+	if userSession.isExpired() {
+		delete(sessions, sessionToken)
+		http.Error(w, `{"message": "Session expired"}`, http.StatusUnauthorized)
+		return
+	}
+
+	// Generate a new session token
+	newSessionToken := uuid.NewString()
+	expiresAt := time.Now().Add(30 * time.Minute) // Extend session duration
+
+	// Store new session and delete the old one
+	sessions[newSessionToken] = session{
+		username: userSession.username,
+		role:     userSession.role,
+		expiry:   expiresAt,
+	}
+	delete(sessions, sessionToken)
+
+	// Set a new cookie with updated session token
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_cookie",
+		Value:    newSessionToken,
+		Expires:  expiresAt,
+		HttpOnly: true,
+		Secure:   false, // Set to true in production with HTTPS
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	// Respond with session details
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":  "Session refreshed successfully",
+		"username": userSession.username,
+		"role":     userSession.role,
+		"expiry":   expiresAt,
+	})
+}
+
+func Logout(w http.ResponseWriter, r *http.Request) {
+	// Retrieve the session cookie
+	cookie, err := r.Cookie("session_cookie")
+	if err != nil {
+		if err == http.ErrNoCookie {
+			http.Error(w, `{"message": "No session cookie provided"}`, http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, `{"message": "Invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Get the session token from the cookie
+	sessionToken := cookie.Value
+
+	// Remove the session from the in-memory store
+	delete(sessions, sessionToken)
+
+	// Clear the session cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_cookie",
+		Value:    "",
+		Expires:  time.Now().Add(-1 * time.Second),
+		HttpOnly: true,
+		Secure:   false, // Set to true in production with HTTPS
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	// Respond with a success message
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Logged out successfully",
+	})
+}
