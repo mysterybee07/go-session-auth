@@ -8,5 +8,6 @@ import (
 
 func Setup() {
 	http.HandleFunc("/login", controllers.Login)
+	http.HandleFunc("/home", controllers.Home)
 
 }

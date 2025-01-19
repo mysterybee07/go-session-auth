@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -30,6 +31,10 @@ var (
 
 	sessions = make(map[string]session)
 )
+
+func (s session) isExpired() bool {
+	return s.expiry.Before(time.Now())
+}
 
 func Login(w http.ResponseWriter, r *http.Request) {
 	var creds Credentials
@@ -74,4 +79,35 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		"role":    userData.Role,
 	})
 
+}
+
+func Home(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session_cookie")
+	if err != nil {
+		if err == http.ErrNoCookie {
+			json.NewEncoder(w).Encode(map[string]string{
+				"message": "No cookies found",
+			})
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	sessionToken := cookie.Value
+
+	userSession, exists := sessions[sessionToken]
+
+	if !exists {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	if userSession.isExpired() {
+		delete(sessions, sessionToken)
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	w.Write([]byte(fmt.Sprintf("Welcome %s ! Your Role is %s", userSession.username, userSession.role)))
 }
